@@ -19,27 +19,6 @@ type OperationPlanner struct {
 	logger     log.Logger
 }
 
-type Operation int
-
-const (
-	OperationRun Operation = iota
-	OperationScan
-	OperationDestroy
-)
-
-type DirOperation struct {
-	Dir       string
-	Operation Operation
-}
-
-type OperationBatch []DirOperation
-
-type OperationPlan struct {
-	OperationBatches []OperationBatch
-	Command          string
-	CommonRoot       string
-}
-
 func New(changelist []string, workDir string, command string) *OperationPlanner {
 	return &OperationPlanner{
 		changelist: changelist,
@@ -50,7 +29,7 @@ func New(changelist []string, workDir string, command string) *OperationPlanner 
 }
 
 func (p *OperationPlan) getBatchSummary(b *OperationBatch) string {
-	return strings.Join(funk.Map(*b, func(op DirOperation) string {
+	return strings.Join(funk.Map(b.Operations, func(op DirOperation) string {
 		destroyWarning := ""
 		if op.Operation == OperationDestroy {
 			destroyWarning = " [!!! DESTROY !!!] "
@@ -61,7 +40,7 @@ func (p *OperationPlan) getBatchSummary(b *OperationBatch) string {
 
 func (p *OperationPlan) GetSummary() string {
 	builder := strings.Builder{}
-	builder.WriteString(fmt.Sprintf("\nOperation plan for command \"%s\" includes %d batches.\n\n", p.Command, len(p.OperationBatches)))
+	builder.WriteString(fmt.Sprintf("\nOperation plan for command \"%s\" includes %d batches.\nWill be run in the root directory %s.\n\n", p.Command, len(p.OperationBatches), p.CommonRoot))
 	for i, b := range p.OperationBatches {
 		builder.WriteString(fmt.Sprintf("\n> Batch #%d:\n", i))
 		builder.WriteString(p.getBatchSummary(&b))
@@ -114,14 +93,20 @@ func getCommonRoot(plan *OperationPlan, path string) string {
 }
 
 func filterScanOperations(plan *OperationPlan) {
+	// Map each batch to contain only non-scan operations
 	plan.OperationBatches = funk.Map(plan.OperationBatches, func(b OperationBatch) OperationBatch {
-		return funk.Filter(b, func(op DirOperation) bool {
-			return op.Operation != OperationScan
-		}).([]DirOperation)
+		return OperationBatch{
+			Operations: funk.Filter(b.Operations, func(op DirOperation) bool {
+				return op.Operation != OperationScan
+			}).([]DirOperation),
+
+			RunOnBaseBranch: b.RunOnBaseBranch,
+		}
 	}).([]OperationBatch)
 
+	// Remove empty batches that remain
 	plan.OperationBatches = funk.Filter(plan.OperationBatches, func(b OperationBatch) bool {
-		return len(b) > 0
+		return len(b.Operations) > 0
 	}).([]OperationBatch)
 }
 
@@ -138,10 +123,10 @@ func isDirRunnable(dir string) (bool, error) {
 func (p *OperationPlanner) getInitialBatch() (OperationBatch, error) {
 	changedDirs, err := p.getChangedDirectories()
 	if err != nil {
-		return nil, fmt.Errorf("getting changed directories %w", err)
+		return OperationBatch{}, fmt.Errorf("getting changed directories %w", err)
 	}
 
-	return funk.Map(changedDirs, func(dir string) DirOperation {
+	return OperationBatch{Operations: funk.Map(changedDirs, func(dir string) DirOperation {
 		var op Operation
 		exists, err := pathutil.IsPathExists(dir)
 		if err != nil {
@@ -163,7 +148,7 @@ func (p *OperationPlanner) getInitialBatch() (OperationBatch, error) {
 		}
 
 		return DirOperation{Dir: p.absolutePath(dir), Operation: op} // TODO destroy on deleted dirs
-	}).([]DirOperation), nil
+	}).([]DirOperation)}, nil
 }
 
 func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
@@ -176,10 +161,15 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 		return nil, fmt.Errorf("getting initial batch: %w", err)
 	}
 
-	destroyBatch := funk.Filter(initialBatch, func(op DirOperation) bool {
-		return op.Operation == OperationDestroy
-	}).([]DirOperation)
-	currentBatch := funk.Map(initialBatch, func(op DirOperation) DirOperation {
+	destroyBatch := OperationBatch{
+		Operations: funk.Filter(initialBatch.Operations, func(op DirOperation) bool {
+			return op.Operation == OperationDestroy
+		}).([]DirOperation),
+
+		RunOnBaseBranch: true,
+	}
+
+	currentBatchOperations := funk.Map(initialBatch.Operations, func(op DirOperation) DirOperation {
 		if op.Operation == OperationDestroy {
 			// Include destroyed modules in scanning
 			return DirOperation{Dir: op.Dir, Operation: OperationScan}
@@ -191,10 +181,10 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 	plan := OperationPlan{
 		Command: p.command,
 	}
-	plan.OperationBatches = []OperationBatch{currentBatch}
+	plan.OperationBatches = []OperationBatch{{Operations: currentBatchOperations}}
 
-	for len(currentBatch) > 0 {
-		var nextBatch []DirOperation
+	for len(currentBatchOperations) > 0 {
+		var nextBatchOperations []DirOperation
 
 		p.logger.Infof("Walking path for layer %d", len(plan.OperationBatches))
 		err := filepath.Walk(p.workDir, func(path string, info os.FileInfo, err error) error {
@@ -214,7 +204,7 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 
 			// Is any of the dependencies include something from the current batch?
 			if funk.Contains(deps, func(s string) bool {
-				return funk.Contains(currentBatch, func(op DirOperation) bool {
+				return funk.Contains(currentBatchOperations, func(op DirOperation) bool {
 					return op.Dir == s
 				})
 			}) {
@@ -226,7 +216,7 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 					op = DirOperation{Dir: filepath.Dir(path), Operation: OperationScan}
 				}
 				plan.CommonRoot = getCommonRoot(&plan, path)
-				nextBatch = append(nextBatch, op)
+				nextBatchOperations = append(nextBatchOperations, op)
 			}
 
 			return nil
@@ -235,23 +225,23 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 			return nil, fmt.Errorf("walking files: %w", err)
 		}
 
-		nextBatch = funk.Uniq(nextBatch).([]DirOperation)
+		nextBatchOperations = funk.Uniq(nextBatchOperations).([]DirOperation)
 
-		p.logger.Infof("Found %d new items", len(nextBatch))
-		p.logger.Debugf("%s", strings.Join(funk.Map(nextBatch, func(op DirOperation) string {
+		p.logger.Infof("Found %d new items", len(nextBatchOperations))
+		p.logger.Debugf("%s", strings.Join(funk.Map(nextBatchOperations, func(op DirOperation) string {
 			return strings.TrimPrefix(op.Dir, plan.CommonRoot)
 		}).([]string), ", "))
 
-		if len(nextBatch) > 0 {
-			plan.OperationBatches = append(plan.OperationBatches, nextBatch)
+		if len(nextBatchOperations) > 0 {
+			plan.OperationBatches = append(plan.OperationBatches, OperationBatch{Operations: nextBatchOperations})
 		}
-		currentBatch = nextBatch
+		currentBatchOperations = nextBatchOperations
 	}
 
 	// No need to scan anymore, keep only dirs which will be executed
 	filterScanOperations(&plan)
-	// Prepend destroyables to catch errors with dependent modules
-	plan.OperationBatches = append([]OperationBatch{destroyBatch}, plan.OperationBatches...)
+	// And finally destroy what needs to be destoryed
+	plan.OperationBatches = append(plan.OperationBatches, destroyBatch)
 
 	return &plan, nil
 }

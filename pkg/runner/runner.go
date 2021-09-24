@@ -18,21 +18,32 @@ var extractorRegexes = [...]*regexp.Regexp{
 	regexp.MustCompile(`(?i)\s*Plan:`),
 	regexp.MustCompile(`(?i)warning`),
 	regexp.MustCompile(`(?i)error`),
+	regexp.MustCompile(`(?i)outputs`),
+}
+
+type Repository interface {
+	GetChangedFiles(baseBranch string) ([]string, error)
+	CheckoutBranch(branch string) error
+	GetCurrentBranch() (string, error)
 }
 
 type Runner struct {
 	plan             *operationplanner.OperationPlan
+	codeRepository   Repository
+	baseBranch       string
 	Command          string
 	ExtractedOutputs map[string]string
 	logger           log.Logger
 }
 
-func New(plan *operationplanner.OperationPlan, command string) *Runner {
+func New(plan *operationplanner.OperationPlan, codeRepository Repository, command string, baseBranch string) *Runner {
 	return &Runner{
 		plan:             plan,
 		ExtractedOutputs: map[string]string{},
 		logger:           log.NewLogger(),
 		Command:          command,
+		codeRepository:   codeRepository,
+		baseBranch:       baseBranch,
 	}
 }
 
@@ -73,7 +84,21 @@ func extractCommandOutputLines(optext string) []string {
 
 func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 	logger := log.NewLogger()
-	for _, op := range b {
+
+	originalBranch := ""
+	if b.RunOnBaseBranch {
+		var err error
+		if originalBranch, err = r.codeRepository.GetCurrentBranch(); err != nil {
+			return err
+		}
+		r.logger.Debugf("On branch %s", originalBranch)
+		r.logger.Infof("Checking out base branch %s", r.baseBranch)
+		if err := r.codeRepository.CheckoutBranch(r.baseBranch); err != nil {
+			return fmt.Errorf("checkout base branch: %w", err)
+		}
+	}
+
+	for _, op := range b.Operations {
 		if op.Operation == operationplanner.OperationScan {
 			r.logger.Debugf("Skipping scan")
 			continue
@@ -90,6 +115,13 @@ func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 			return fmt.Errorf("running operation: %w", err)
 		} else if len(optext) > 0 {
 			r.ExtractedOutputs[op.Dir] = optext
+		}
+	}
+
+	if b.RunOnBaseBranch {
+		r.logger.Infof("Checking out original branch %s", originalBranch)
+		if err := r.codeRepository.CheckoutBranch(originalBranch); err != nil {
+			return fmt.Errorf("checkout original branch: %w", err)
 		}
 	}
 

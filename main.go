@@ -38,13 +38,14 @@ func run() error {
 
 	logger.Infof("\n=================================================\n")
 	logger.Infof("Running operations in order\n")
-	r := runner.New(plan, cfg.Command)
+	r := runner.New(plan, g, cfg.Command, cfg.BaseBranch)
 	if err := r.Run(); err != nil {
 		return fmt.Errorf("run operation: %w", err)
 	}
 
 	logger.Infof("\n=================================================\n")
-	logger.Infof("Command execution results for %d files:\n\n", len(r.ExtractedOutputs))
+	logger.Infof("Command execution results for %d files:\n", len(r.ExtractedOutputs))
+	logger.Infof("Ran in root directory %s\n\n", plan.CommonRoot)
 
 	for _, optext := range r.ExtractedOutputs {
 		logger.Printf("%s\n", optext)
