@@ -13,13 +13,13 @@ import (
 type OperationPlanner struct {
 	changelist []string
 	workDir    string
-	logger 	log.Logger
+	logger     log.Logger
 }
 
 type Operation int
 
 const (
-	OPERATION_RUN Operation = iota
+	OPERATION_RUN  Operation = iota
 	OPERATION_SCAN Operation = iota
 	OPERATION_DESTROY
 )
@@ -39,7 +39,7 @@ func New(changelist []string, workDir string) *OperationPlanner {
 	return &OperationPlanner{
 		changelist: changelist,
 		workDir:    workDir,
-		logger : log.NewLogger(),
+		logger:     log.NewLogger(),
 	}
 }
 
@@ -69,7 +69,13 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 	}
 
 	currentLayer := funk.Map(changedDirs, func(s string) DirOperation {
-		return DirOperation{Dir: p.absolutePath(s), Operation: OPERATION_RUN} // TODO destroy on deleted dirs
+		var op Operation
+		if filepath.Ext(s) == ".hcl" {
+			op = OPERATION_RUN
+		} else {
+			op = OPERATION_SCAN
+		}
+		return DirOperation{Dir: p.absolutePath(s), Operation: op} // TODO destroy on deleted dirs
 	}).([]DirOperation)
 
 	plan := OperationPlan{}

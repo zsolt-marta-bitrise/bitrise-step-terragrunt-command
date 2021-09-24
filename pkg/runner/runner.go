@@ -65,6 +65,7 @@ func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 			r.logger.Warnf(optext)
 			return fmt.Errorf("running operation: %w", err)
 		} else if len(optext) > 0 {
+			r.logger.Debugf(optext)
 			r.PlanOutputs[op.Dir] = optext
 		}
 	}
