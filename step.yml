@@ -76,7 +76,10 @@ inputs:
       description: The command to run with Terragrunt
       is_expand: true
       is_required: true
-      value_options: [ ]
+      value_options:
+        - plan
+        - validate
+        - apply
 outputs:
   - COMMAND_OUTPUT:
     opts:

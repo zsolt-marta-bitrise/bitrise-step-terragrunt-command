@@ -9,14 +9,15 @@ import (
 	"github.com/bitrise-io/go-utils/env"
 	"github.com/bitrise-io/go-utils/log"
 	"github.com/thoas/go-funk"
+	"github.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command/pkg/config"
 	"github.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command/pkg/operationplanner"
 )
 
-var EXTRACTOR_REGEXES = [...]*regexp.Regexp{
-	regexp.MustCompile(`\s*#\s+[\w\[\]\-._[:cntrl:]]+\s+will\s+be`),
-	regexp.MustCompile(`\s*Plan:`),
-	regexp.MustCompile(`warning`),
-	regexp.MustCompile(`error`),
+var extractorRegexes = [...]*regexp.Regexp{
+	regexp.MustCompile(`(?i)\s*#\s+[\w\[\]\-._[:cntrl:]]+\s+will\s+be`),
+	regexp.MustCompile(`(?i)\s*Plan:`),
+	regexp.MustCompile(`(?i)warning`),
+	regexp.MustCompile(`(?i)error`),
 }
 
 type Runner struct {
@@ -46,7 +47,7 @@ func (r *Runner) runCommand(op operationplanner.DirOperation) (string, error) {
 
 	if out, err := cmd.RunAndReturnTrimmedCombinedOutput(); err != nil {
 		r.logger.Warnf(out)
-		return out, fmt.Errorf("running plan in %s: err: %w", op.Dir, err)
+		return out, fmt.Errorf("running %s in %s: err: %w", r.Command, op.Dir, err)
 	} else {
 		r.logger.Infof(out)
 		return createCommandSummary(op, r.Command, r.plan, extractCommandOutputLines(out)), nil
@@ -61,7 +62,7 @@ func extractCommandOutputLines(optext string) []string {
 	lines := strings.Split(optext, "\n")
 	var matchingLines []string
 	for _, line := range lines {
-		if funk.Contains(EXTRACTOR_REGEXES, func(r *regexp.Regexp) bool {
+		if funk.Contains(extractorRegexes, func(r *regexp.Regexp) bool {
 			return r.MatchString(line)
 		}) {
 			matchingLines = append(matchingLines, "> "+line)
@@ -73,10 +74,17 @@ func extractCommandOutputLines(optext string) []string {
 func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 	logger := log.NewLogger()
 	for _, op := range b {
-		if op.Operation != operationplanner.OPERATION_RUN {
+		if op.Operation == operationplanner.OperationScan {
+			r.logger.Debugf("Skipping scan")
 			continue
 		}
-		logger.Infof("Running operation in %s", strings.TrimPrefix(op.Dir, r.plan.CommonRoot))
+		if op.Operation == operationplanner.OperationDestroy {
+			if r.Command != config.CommandApply {
+				r.logger.Infof("Skipping destroy operation when command is %s", r.Command)
+				continue
+			}
+		}
+		logger.Infof("Running operation (command \"%s\") in %s", r.Command, strings.TrimPrefix(op.Dir, r.plan.CommonRoot))
 
 		if optext, err := r.runCommand(op); err != nil {
 			return fmt.Errorf("running operation: %w", err)

@@ -8,6 +8,12 @@ import (
 	"github.com/bitrise-io/go-steputils/stepconf"
 )
 
+const (
+	CommandPlan     = "plan"
+	CommandApply    = "apply"
+	CommandValidate = "validate"
+)
+
 type Config struct {
 	WorkDir       string `env:"work_dir,required"`
 	BaseBranch    string `env:"base_branch,required"`
