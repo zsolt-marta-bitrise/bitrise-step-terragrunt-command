@@ -1,0 +1,85 @@
+#
+# A couple of useful guides & docs:
+#
+# - Main Bitrise CLI docs: https://github.com/bitrise-io/bitrise/tree/master/_docs
+# - Step Development Guideline: https://github.com/bitrise-io/bitrise/blob/master/_docs/step-development-guideline.md
+# - Bitrise.yml format spec: https://github.com/bitrise-io/bitrise/blob/master/_docs/bitrise-yml-format-spec.md
+# - Bitrise docs: http://devcenter.bitrise.io/
+# - Bitrise CLI guides: http://devcenter.bitrise.io/bitrise-cli/
+
+title: |-
+  Terragrunt command
+summary: |
+   Runs a specified terragrunt command in the changed modules and their dependencies
+description: |
+   Runs a specified terragrunt command in the changed modules and their dependencies
+website: https://git.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command
+source_code_url: https://git.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command
+support_url: https://git.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command/issues
+host_os_tags:
+  - osx-10.10
+  - ubuntu-16.04
+
+
+# Type tags are used for categorizing steps, for easier step discovery in Step Libraries.
+# You can find more information about type tags in the Step Development Guideline:
+# https://github.com/bitrise-io/bitrise/blob/master/_docs/step-development-guideline.md
+type_tags:
+  - utility
+
+is_requires_admin_user: true
+is_always_run: false
+is_skippable: false
+run_if: ""
+
+deps:
+  brew:
+  - name: git
+  - name: wget
+  apt_get:
+  - name: git
+  - name: wget
+
+toolkit:
+  go:
+    package_name: github.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command
+
+inputs:
+  - work_dir: $BITRISE_SOURCE_DIR
+    opts:
+      title: "The source directory of the project"
+      summary: The source directory of the project
+      description: The source directory of the project
+      is_expand: true
+      is_required: true
+      value_options: []
+  - base_branch: $BITRISEIO_GIT_BRANCH_DEST
+    opts:
+      title: "The branch to compare this branch to"
+      summary: The branch to compare this branch to
+      description: The branch to compare this branch to
+      is_expand: true
+      is_required: true
+      value_options: [ ]
+  - repo_url: $GIT_REPOSITORY_URL
+    opts:
+      title: "The git repo url"
+      summary: The git repo url
+      description: The git repo url
+      is_expand: true
+      is_required: true
+      value_options: [ ]
+  - command: plan
+    opts:
+      title: "The command to run with Terragrunt"
+      summary: The command to run with Terragrunt
+      description: The command to run with Terragrunt
+      is_expand: true
+      is_required: true
+      value_options: [ ]
+outputs:
+  - COMMAND_OUTPUT:
+    opts:
+      title: "Output of the command"
+      summary: Output printed by the commands
+      description: Output printed by the commands
