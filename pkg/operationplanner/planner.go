@@ -13,6 +13,7 @@ import (
 type OperationPlanner struct {
 	changelist []string
 	workDir    string
+	command    string
 	logger     log.Logger
 }
 
@@ -33,14 +34,34 @@ type OperationBatch []DirOperation
 
 type OperationPlan struct {
 	OperationBatches []OperationBatch
+	Command          string
+	CommonRoot       string
 }
 
-func New(changelist []string, workDir string) *OperationPlanner {
+func New(changelist []string, workDir string, command string) *OperationPlanner {
 	return &OperationPlanner{
 		changelist: changelist,
 		workDir:    workDir,
 		logger:     log.NewLogger(),
+		command:    command,
 	}
+}
+
+func (p *OperationPlan) getBatchSummary(b *OperationBatch) string {
+	return strings.Join(funk.Map(*b, func(op DirOperation) string {
+		return "- " + strings.TrimPrefix(op.Dir, p.CommonRoot)
+	}).([]string), "\n")
+}
+
+func (p *OperationPlan) GetSummary() string {
+	builder := strings.Builder{}
+	builder.WriteString(fmt.Sprintf("\nOperation plan for command \"%s\" includes %d batches.\n\n", p.Command, len(p.OperationBatches)))
+	for i, b := range p.OperationBatches {
+		builder.WriteString(fmt.Sprintf("\n> Batch #%d:\n", i))
+		builder.WriteString(p.getBatchSummary(&b))
+		builder.WriteString("\n")
+	}
+	return builder.String()
 }
 
 func (p *OperationPlanner) getChangedDirectories() ([]string, error) {
@@ -59,9 +80,48 @@ func (p *OperationPlanner) absolutePath(path string) string {
 	return filepath.Join(p.workDir, path)
 }
 
+func getCommonRoot(plan *OperationPlan, path string) string {
+	if plan.CommonRoot == "" {
+		return filepath.Dir(path) + string(filepath.Separator)
+	}
+
+	currentElems := strings.Split(plan.CommonRoot, string(filepath.Separator))
+	if len(currentElems) < 2 {
+		return plan.CommonRoot
+	}
+	pathElems := strings.Split(path, string(filepath.Separator))
+	commonRootLength := 0
+	for i, elem := range currentElems {
+		if i >= len(pathElems) || elem != pathElems[i] {
+			break
+		}
+		commonRootLength++
+	}
+	if commonRootLength > 1 {
+		if pathElems[commonRootLength-1] != "" {
+			return strings.Join(pathElems[:commonRootLength], string(filepath.Separator)) + string(filepath.Separator)
+		} else {
+			return strings.Join(pathElems[:commonRootLength], string(filepath.Separator))
+		}
+	}
+	return string(filepath.Separator)
+}
+
+func filterScanOperations(plan *OperationPlan) {
+	plan.OperationBatches = funk.Map(plan.OperationBatches, func(b OperationBatch) OperationBatch {
+		return funk.Filter(b, func(op DirOperation) bool {
+			return op.Operation != OPERATION_SCAN
+		}).([]DirOperation)
+	}).([]OperationBatch)
+
+	plan.OperationBatches = funk.Filter(plan.OperationBatches, func(b OperationBatch) bool {
+		return len(b) > 0
+	}).([]OperationBatch)
+}
+
 func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
-	p.logger.Printf("Planning %s based on %d changes", p.workDir, len(p.changelist))
-	p.logger.Debugf("Initial changelist %s", strings.Join(p.changelist, ",\n"))
+	p.logger.Infof("Planning %s based on %d changes", p.workDir, len(p.changelist))
+	p.logger.Debugf("Initial changelist: %s", strings.Join(p.changelist, ",\n"))
 
 	changedDirs, err := p.getChangedDirectories()
 	if err != nil {
@@ -78,7 +138,9 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 		return DirOperation{Dir: p.absolutePath(s), Operation: op} // TODO destroy on deleted dirs
 	}).([]DirOperation)
 
-	plan := OperationPlan{}
+	plan := OperationPlan{
+		Command: p.command,
+	}
 	plan.OperationBatches = []OperationBatch{currentLayer}
 
 	for len(currentLayer) > 0 {
@@ -112,6 +174,7 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 				} else {
 					op = DirOperation{Dir: filepath.Dir(path), Operation: OPERATION_SCAN}
 				}
+				plan.CommonRoot = getCommonRoot(&plan, path)
 				nextLayer = append(nextLayer, op)
 			}
 
@@ -125,7 +188,7 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 
 		p.logger.Infof("Found %d new items", len(nextLayer))
 		p.logger.Debugf("%s", strings.Join(funk.Map(nextLayer, func(op DirOperation) string {
-			return op.Dir
+			return strings.TrimPrefix(op.Dir, plan.CommonRoot)
 		}).([]string), ", "))
 
 		if len(nextLayer) > 0 {
@@ -133,6 +196,8 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 		}
 		currentLayer = nextLayer
 	}
+
+	filterScanOperations(&plan)
 
 	return &plan, nil
 }

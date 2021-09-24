@@ -3,54 +3,71 @@ package runner
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/bitrise-io/go-utils/command"
 	"github.com/bitrise-io/go-utils/env"
 	"github.com/bitrise-io/go-utils/log"
+	"github.com/thoas/go-funk"
 	"github.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command/pkg/operationplanner"
 )
 
+var EXTRACTOR_REGEXES = [...]*regexp.Regexp{
+	regexp.MustCompile(`\s*#\s+[\w\[\]\-._[:cntrl:]]+\s+will\s+be`),
+	regexp.MustCompile(`\s*Plan:`),
+	regexp.MustCompile(`warning`),
+	regexp.MustCompile(`error`),
+}
+
 type Runner struct {
-	plan        *operationplanner.OperationPlan
-	Command     string
-	PlanOutputs map[string]string
-	logger      log.Logger
+	plan             *operationplanner.OperationPlan
+	Command          string
+	ExtractedOutputs map[string]string
+	logger           log.Logger
 }
 
 func New(plan *operationplanner.OperationPlan, command string) *Runner {
 	return &Runner{
-		plan:        plan,
-		PlanOutputs: map[string]string{},
-		logger:      log.NewLogger(),
-		Command:     command,
+		plan:             plan,
+		ExtractedOutputs: map[string]string{},
+		logger:           log.NewLogger(),
+		Command:          command,
 	}
 }
 
-func (r *Runner) runCommand(dir string) (string, error) {
+func (r *Runner) runCommand(op operationplanner.DirOperation) (string, error) {
 	f := command.NewFactory(env.NewRepository())
 	opts := &command.Opts{
-		Dir: dir,
+		Dir: op.Dir,
 		Env: []string{},
 	}
 
 	cmd := f.Create("terragrunt", []string{r.Command}, opts)
 
 	if out, err := cmd.RunAndReturnTrimmedCombinedOutput(); err != nil {
-		return out, fmt.Errorf("running plan in %s: err: %w", dir, err)
+		r.logger.Warnf(out)
+		return out, fmt.Errorf("running plan in %s: err: %w", op.Dir, err)
 	} else {
-		return extractCommandOutput(out), nil
+		r.logger.Infof(out)
+		return createCommandSummary(op, r.Command, r.plan, extractCommandOutputLines(out)), nil
 	}
 }
 
-func extractCommandOutput(optext string) string {
-	r := regexp.MustCompile(`(?s).*Terraform\s+will\s+[^:]+:\s+(.+)`)
+func createCommandSummary(op operationplanner.DirOperation, command string, plan *operationplanner.OperationPlan, outputLines []string) string {
+	return fmt.Sprintf("### Operation \"%s\" key info:\n(in directory %s)\n\n%s\n", command, strings.TrimPrefix(op.Dir, plan.CommonRoot), strings.Join(outputLines, "\n...\n"))
+}
 
-	match := r.FindStringSubmatch(optext)
-	if len(match) < 2 {
-		return ""
+func extractCommandOutputLines(optext string) []string {
+	lines := strings.Split(optext, "\n")
+	var matchingLines []string
+	for _, line := range lines {
+		if funk.Contains(EXTRACTOR_REGEXES, func(r *regexp.Regexp) bool {
+			return r.MatchString(line)
+		}) {
+			matchingLines = append(matchingLines, "> "+line)
+		}
 	}
-
-	return match[1]
+	return matchingLines
 }
 
 func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
@@ -59,14 +76,12 @@ func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 		if op.Operation != operationplanner.OPERATION_RUN {
 			continue
 		}
-		logger.Infof("Running operation in %s", op.Dir)
+		logger.Infof("Running operation in %s", strings.TrimPrefix(op.Dir, r.plan.CommonRoot))
 
-		if optext, err := r.runCommand(op.Dir); err != nil {
-			r.logger.Warnf(optext)
+		if optext, err := r.runCommand(op); err != nil {
 			return fmt.Errorf("running operation: %w", err)
 		} else if len(optext) > 0 {
-			r.logger.Debugf(optext)
-			r.PlanOutputs[op.Dir] = optext
+			r.ExtractedOutputs[op.Dir] = optext
 		}
 	}
 

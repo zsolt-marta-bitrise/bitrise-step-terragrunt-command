@@ -13,6 +13,8 @@ import (
 )
 
 func run() error {
+	logger := log.NewLogger()
+
 	cfg, err := config.NewConfig()
 	if err != nil {
 		return fmt.Errorf("new gitops config: %w", err)
@@ -25,24 +27,27 @@ func run() error {
 		return fmt.Errorf("get changed files: %w", err)
 	}
 
-	p := operationplanner.New(changedFiles, cfg.WorkDir)
+	p := operationplanner.New(changedFiles, cfg.WorkDir, cfg.Command)
 	plan, err := p.PlanOperation()
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
 	}
 
+	logger.Infof("\n=================================================\n")
+	logger.Infof(plan.GetSummary())
+
+	logger.Infof("\n=================================================\n")
+	logger.Infof("Running operations in order\n")
 	r := runner.New(plan, cfg.Command)
 	if err := r.Run(); err != nil {
 		return fmt.Errorf("run operation: %w", err)
 	}
 
-	logger := log.NewLogger()
-	logger.Infof("Plan for %d files:\n\n", len(r.PlanOutputs))
+	logger.Infof("\n=================================================\n")
+	logger.Infof("Command execution results for %d files:\n\n", len(r.ExtractedOutputs))
 
-	for module, optext := range r.PlanOutputs {
-		logger.Infof("======================================================================\n\n", module)
-		logger.Infof("Terragrunt command output for %s\n\n", module)
-		logger.Infof("%s\n\n", optext)
+	for _, optext := range r.ExtractedOutputs {
+		logger.Printf("%s\n", optext)
 	}
 
 	return nil
