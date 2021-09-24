@@ -14,14 +14,16 @@ import (
 )
 
 var extractorRegexes = [...]*regexp.Regexp{
-	regexp.MustCompile(`(?i)\s*#\s+[\w\[\]\-._[:cntrl:]]+\s+will\s+be`),
+	regexp.MustCompile(`(?i)\s*#\s+[\w\[\]\-._[:cntrl:]"]+\s+will\s+be`),
 	regexp.MustCompile(`(?i)\s*Plan:`),
 	regexp.MustCompile(`(?i)warning`),
 	regexp.MustCompile(`(?i)error`),
 	regexp.MustCompile(`(?i)outputs`),
+	regexp.MustCompile(`(?i)\s*[[:cntrl:]]*\s*(?:~|->|\+|-/\+|\+/-)\s*[[:cntrl:]]*\s+`),
+	regexp.MustCompile(`(?i)no\s+changes`),
 }
 
-type Repository interface {
+type codeRepository interface {
 	GetChangedFiles(baseBranch string) ([]string, error)
 	CheckoutBranch(branch string) error
 	GetCurrentBranch() (string, error)
@@ -29,17 +31,17 @@ type Repository interface {
 
 type Runner struct {
 	plan             *operationplanner.OperationPlan
-	codeRepository   Repository
+	codeRepository   codeRepository
 	baseBranch       string
 	Command          string
-	ExtractedOutputs map[string]string
+	CommandSummaries map[string]string
 	logger           log.Logger
 }
 
-func New(plan *operationplanner.OperationPlan, codeRepository Repository, command string, baseBranch string) *Runner {
+func New(plan *operationplanner.OperationPlan, codeRepository codeRepository, command string, baseBranch string) *Runner {
 	return &Runner{
 		plan:             plan,
-		ExtractedOutputs: map[string]string{},
+		CommandSummaries: map[string]string{},
 		logger:           log.NewLogger(),
 		Command:          command,
 		codeRepository:   codeRepository,
@@ -66,7 +68,10 @@ func (r *Runner) runCommand(op operationplanner.DirOperation) (string, error) {
 }
 
 func createCommandSummary(op operationplanner.DirOperation, command string, plan *operationplanner.OperationPlan, outputLines []string) string {
-	return fmt.Sprintf("### Operation \"%s\" key info:\n(in directory %s)\n\n%s\n", command, strings.TrimPrefix(op.Dir, plan.CommonRoot), strings.Join(outputLines, "\n...\n"))
+	return fmt.Sprintf("### Operation \"%s\" key points:\n(in directory %s)\n\n%s\n\n-------------------------------------\n\n",
+		command,
+		strings.TrimPrefix(op.Dir, plan.CommonRoot),
+		strings.Join(outputLines, "\n...\n"))
 }
 
 func extractCommandOutputLines(optext string) []string {
@@ -114,7 +119,7 @@ func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 		if optext, err := r.runCommand(op); err != nil {
 			return fmt.Errorf("running operation: %w", err)
 		} else if len(optext) > 0 {
-			r.ExtractedOutputs[op.Dir] = optext
+			r.CommandSummaries[op.Dir] = optext
 		}
 	}
 
@@ -139,4 +144,16 @@ func (r *Runner) Run() error {
 	}
 
 	return nil
+}
+
+func (r *Runner) GetSummary() string {
+	builder := strings.Builder{}
+	builder.WriteString(fmt.Sprintf("Execution results of command \"%s\":\nRan in the root directory %s.\n\n", r.Command, r.plan.CommonRoot))
+	for _, b := range r.plan.OperationBatches {
+		for _, d := range b.Operations {
+			builder.WriteString(r.CommandSummaries[d.Dir])
+			builder.WriteString("")
+		}
+	}
+	return builder.String()
 }

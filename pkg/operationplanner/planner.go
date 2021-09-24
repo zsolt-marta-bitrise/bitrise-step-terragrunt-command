@@ -40,7 +40,7 @@ func (p *OperationPlan) getBatchSummary(b *OperationBatch) string {
 
 func (p *OperationPlan) GetSummary() string {
 	builder := strings.Builder{}
-	builder.WriteString(fmt.Sprintf("\nOperation plan for command \"%s\" includes %d batches.\nWill be run in the root directory %s.\n\n", p.Command, len(p.OperationBatches), p.CommonRoot))
+	builder.WriteString(fmt.Sprintf("Operation plan for command \"%s\" includes %d batches.\nWill be run in the root directory %s.\n\n", p.Command, len(p.OperationBatches), p.CommonRoot))
 	for i, b := range p.OperationBatches {
 		builder.WriteString(fmt.Sprintf("\n> Batch #%d:\n", i))
 		builder.WriteString(p.getBatchSummary(&b))

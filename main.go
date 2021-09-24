@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/bitrise-io/go-steputils/stepconf"
 	"github.com/bitrise-io/go-utils/log"
@@ -33,25 +34,37 @@ func run() error {
 		return fmt.Errorf("operation: %w", err)
 	}
 
-	logger.Infof("\n=================================================\n")
+	logger.Infof("\n=================================================\n\n")
 	logger.Infof(plan.GetSummary())
 
-	logger.Infof("\n=================================================\n")
+	logger.Infof("\n=================================================\n\n")
 	logger.Infof("Running operations in order\n")
 	r := runner.New(plan, g, cfg.Command, cfg.BaseBranch)
 	if err := r.Run(); err != nil {
 		return fmt.Errorf("run operation: %w", err)
 	}
 
-	logger.Infof("\n=================================================\n")
-	logger.Infof("Command execution results for %d files:\n", len(r.ExtractedOutputs))
-	logger.Infof("Ran in root directory %s\n\n", plan.CommonRoot)
+	logger.Infof("\n=================================================\n\n")
+	logger.Infof(r.GetSummary())
 
-	for _, optext := range r.ExtractedOutputs {
-		logger.Printf("%s\n", optext)
+	outputCommand := exec.Command("envman", "add", "--key", "COMMAND_OUTPUT", "--value", constructOutput(plan, r))
+	if err := outputCommand.Run(); err != nil {
+		return fmt.Errorf("export output with envman: %w", err)
 	}
 
 	return nil
+}
+
+func constructOutput(plan *operationplanner.OperationPlan, runner *runner.Runner) string {
+	return fmt.Sprintf(`
+===================   TERRAGRUNT %s  ========================
+
+%s
+
+=======================  RESULTS  ===========================
+
+%s
+`, plan.Command, plan.GetSummary(), runner.GetSummary())
 }
 
 func main() {
