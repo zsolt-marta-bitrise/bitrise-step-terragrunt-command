@@ -10,6 +10,7 @@ import (
 	"github.com/bitrise-io/go-utils/log"
 	"github.com/bitrise-io/go-utils/pathutil"
 	"github.com/thoas/go-funk"
+	"github.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command/pkg/config"
 )
 
 type OperationPlanner struct {
@@ -32,7 +33,11 @@ func (p *OperationPlan) getBatchSummary(b *OperationBatch) string {
 	return strings.Join(funk.Map(b.Operations, func(op DirOperation) string {
 		destroyWarning := ""
 		if op.Operation == OperationDestroy {
-			destroyWarning = " [!!! DESTROY !!!] "
+			if p.Command == config.CommandApply {
+				destroyWarning = " [!!! DESTROY !!!] "
+			} else {
+				destroyWarning = " [SKIP] "
+			}
 		}
 		return fmt.Sprintf("- %s%s", destroyWarning, strings.TrimPrefix(op.Dir, p.CommonRoot))
 	}).([]string), "\n")

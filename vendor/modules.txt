@@ -17,6 +17,9 @@ github.com/davecgh/go-spew/spew
 github.com/hashicorp/go-cleanhttp
 # github.com/hashicorp/go-retryablehttp v0.7.0
 github.com/hashicorp/go-retryablehttp
+# github.com/lunixbochs/vtclean v1.0.0
+## explicit
+github.com/lunixbochs/vtclean
 # github.com/pmezard/go-difflib v1.0.0
 github.com/pmezard/go-difflib/difflib
 # github.com/stretchr/testify v1.7.0

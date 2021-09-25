@@ -8,18 +8,19 @@ import (
 	"github.com/bitrise-io/go-utils/command"
 	"github.com/bitrise-io/go-utils/env"
 	"github.com/bitrise-io/go-utils/log"
+	"github.com/lunixbochs/vtclean"
 	"github.com/thoas/go-funk"
 	"github.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command/pkg/config"
 	"github.com/zsolt-marta-bitrise/bitrise-step-terragrunt-command/pkg/operationplanner"
 )
 
 var extractorRegexes = [...]*regexp.Regexp{
-	regexp.MustCompile(`(?i)\s*#\s+[\w\[\]\-._[:cntrl:]"]+\s+will\s+be`),
-	regexp.MustCompile(`(?i)\s*Plan:`),
+	regexp.MustCompile(`(?i)#\s+[\w\[\]\-._"]+\s+will\s+be`),
+	regexp.MustCompile(`(?i)plan:`),
 	regexp.MustCompile(`(?i)warning`),
 	regexp.MustCompile(`(?i)error`),
 	regexp.MustCompile(`(?i)outputs`),
-	regexp.MustCompile(`(?i)\s*[[:cntrl:]]*\s*(?:~|->|\+|-/\+|\+/-)\s*[[:cntrl:]]*\s+`),
+	regexp.MustCompile(`\s+(?:~|->|\+|-/\+|\+/-)\s+`),
 	regexp.MustCompile(`(?i)no\s+changes`),
 }
 
@@ -62,7 +63,7 @@ func (r *Runner) runCommand(op operationplanner.DirOperation) (string, error) {
 		r.logger.Warnf(out)
 		return out, fmt.Errorf("running %s in %s: err: %w", r.Command, op.Dir, err)
 	} else {
-		r.logger.Infof(out)
+		r.logger.Printf(out)
 		return createCommandSummary(op, r.Command, r.plan, extractCommandOutputLines(out)), nil
 	}
 }
@@ -75,7 +76,8 @@ func createCommandSummary(op operationplanner.DirOperation, command string, plan
 }
 
 func extractCommandOutputLines(optext string) []string {
-	lines := strings.Split(optext, "\n")
+	cleantext := vtclean.Clean(optext, false)
+	lines := strings.Split(cleantext, "\n")
 	var matchingLines []string
 	for _, line := range lines {
 		if funk.Contains(extractorRegexes, func(r *regexp.Regexp) bool {
