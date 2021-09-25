@@ -2,6 +2,9 @@ package runner
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -48,6 +51,16 @@ func New(plan *operationplanner.OperationPlan, codeRepository codeRepository, co
 		codeRepository:   codeRepository,
 		baseBranch:       baseBranch,
 	}
+}
+
+func containsHCLFile(dir string) (bool, error) {
+	contents, err := ioutil.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	return funk.Contains(contents, func(fi os.FileInfo) bool {
+		return filepath.Ext(fi.Name()) == ".hcl"
+	}), nil
 }
 
 func (r *Runner) runCommand(op operationplanner.DirOperation) (string, error) {
@@ -106,6 +119,15 @@ func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 	}
 
 	for _, op := range b.Operations {
+		runnable, err := containsHCLFile(op.Dir)
+		if err != nil {
+			return err
+		}
+		if !runnable {
+			r.logger.Infof("Skipping non-runnable directory %s", strings.TrimPrefix(op.Dir, r.plan.CommonRoot))
+			continue
+		}
+
 		if op.Operation == operationplanner.OperationScan {
 			r.logger.Debugf("Skipping scan")
 			continue

@@ -245,7 +245,10 @@ func (p *OperationPlanner) PlanOperation() (*OperationPlan, error) {
 
 	// No need to scan anymore, keep only dirs which will be executed
 	filterScanOperations(&plan)
-	// And finally destroy what needs to be destoryed
+	// And finally destroy what needs to be destroyed
+	for _, op := range destroyBatch.Operations {
+		plan.CommonRoot = getCommonRoot(&plan, op.Dir)
+	}
 	plan.OperationBatches = append(plan.OperationBatches, destroyBatch)
 
 	return &plan, nil
