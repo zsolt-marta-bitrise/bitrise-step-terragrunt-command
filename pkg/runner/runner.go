@@ -1,15 +1,16 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
-	"github.com/bitrise-io/go-utils/command"
-	"github.com/bitrise-io/go-utils/env"
 	"github.com/bitrise-io/go-utils/log"
 	"github.com/lunixbochs/vtclean"
 	"github.com/thoas/go-funk"
@@ -25,6 +26,7 @@ var extractorRegexes = [...]*regexp.Regexp{
 	regexp.MustCompile(`(?i)outputs`),
 	regexp.MustCompile(`\s+(?:~|->|\+|-/\+|\+/-)\s+`),
 	regexp.MustCompile(`(?i)no\s+changes`),
+	regexp.MustCompile(`(?i)configuration is valid`),
 }
 
 type codeRepository interface {
@@ -40,9 +42,11 @@ type Runner struct {
 	Command          string
 	CommandSummaries map[string]string
 	logger           log.Logger
+	cancelChan       <-chan bool
+	isCancelled      bool
 }
 
-func New(plan *operationplanner.OperationPlan, codeRepository codeRepository, command string, baseBranch string, logger log.Logger) *Runner {
+func New(plan *operationplanner.OperationPlan, codeRepository codeRepository, command string, baseBranch string, logger log.Logger, cancelChan <-chan bool) *Runner {
 	return &Runner{
 		plan:             plan,
 		CommandSummaries: map[string]string{},
@@ -50,6 +54,7 @@ func New(plan *operationplanner.OperationPlan, codeRepository codeRepository, co
 		Command:          command,
 		codeRepository:   codeRepository,
 		baseBranch:       baseBranch,
+		cancelChan:       cancelChan,
 	}
 }
 
@@ -64,19 +69,60 @@ func containsHCLFile(dir string) (bool, error) {
 }
 
 func (r *Runner) runCommand(op operationplanner.DirOperation) (string, error) {
-	f := command.NewFactory(env.NewRepository())
-	opts := &command.Opts{
-		Dir: op.Dir,
-		Env: []string{},
+	cmd := exec.Command("terragrunt", r.Command)
+	cmd.Dir = op.Dir
+
+	piper, pipew, err := os.Pipe()
+	if err != nil {
+		return "", err
+	}
+	cmd.Stderr = pipew
+	cmd.Stdout = pipew
+
+	defer func() {
+		pipew.Close()
+		piper.Close()
+	}()
+
+	if err := cmd.Start(); err != nil {
+		return "", err
 	}
 
-	cmd := f.Create("terragrunt", []string{r.Command}, opts)
+	quitChan := make(chan bool, 1)
+	go func() {
+		select {
+		case <-quitChan:
+			return
+		case <-r.cancelChan:
+			r.logger.Infof("Sending SIGINT to child process %d...", cmd.Process.Pid)
+			if err := syscall.Kill(cmd.Process.Pid, syscall.SIGINT); err != nil {
+				r.logger.Warnf("Stop child process: %s", err)
+			}
+			r.isCancelled = true
+		}
+	}()
 
-	if out, err := cmd.RunAndReturnTrimmedCombinedOutput(); err != nil {
-		r.logger.Warnf(out)
+	var outb bytes.Buffer
+	go func() {
+		for {
+			tmp := make([]byte, 1024)
+			_, err := piper.Read(tmp)
+			outb.Write(tmp)
+			r.logger.Printf("%s", string(tmp))
+			if err != nil {
+				break
+			}
+		}
+	}()
+
+	err = cmd.Wait()
+	out := outb.String()
+
+	quitChan <- true // Stop listening for interrupt
+
+	if err != nil {
 		return out, fmt.Errorf("running %s in %s: err: %w", r.Command, op.Dir, err)
 	} else {
-		r.logger.Printf(out)
 		return createCommandSummary(op, r.Command, r.plan, extractCommandOutputLines(out)), nil
 	}
 }
@@ -119,6 +165,9 @@ func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 	}
 
 	for _, op := range b.Operations {
+		if r.isCancelled {
+			break
+		}
 		runnable, err := containsHCLFile(op.Dir)
 		if err != nil {
 			return err
@@ -160,6 +209,9 @@ func (r *Runner) runBatch(b operationplanner.OperationBatch) error {
 func (r *Runner) Run() error {
 	logger := log.NewLogger()
 	for i, batch := range r.plan.OperationBatches {
+		if r.isCancelled {
+			break
+		}
 		logger.Infof("Running batch %d", i)
 
 		if err := r.runBatch(batch); err != nil {

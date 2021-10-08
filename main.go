@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 
 	"github.com/bitrise-io/go-steputils/stepconf"
 	"github.com/bitrise-io/go-utils/log"
@@ -38,22 +40,43 @@ func run() error {
 	logger.Infof("\n=================================================\n\n")
 	logger.Infof(plan.GetSummary())
 
+	sigs := make(chan os.Signal, 1)
+	cancelChan := make(chan bool)
+	errChan := make(chan error)
+	signal.Notify(sigs, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		select {
+		case <-sigs:
+			logger.Infof("Operation cancelled.")
+			cancelChan <- true
+		}
+	}()
+
 	logger.Infof("\n=================================================\n\n")
 	logger.Infof("Running operations in order\n")
-	r := runner.New(plan, g, cfg.Command, cfg.BaseBranch, logger)
-	if err := r.Run(); err != nil {
-		return fmt.Errorf("run operation: %w", err)
-	}
+	go func() {
+		r := runner.New(plan, g, cfg.Command, cfg.BaseBranch, logger, cancelChan)
+		if err := r.Run(); err != nil {
+			errChan <- fmt.Errorf("run operation: %w", err)
+			return
+		}
 
-	logger.Infof("\n=================================================\n\n")
-	logger.Infof(r.GetSummary())
+		logger.Infof("\n=================================================\n\n")
+		logger.Infof(r.GetSummary())
 
-	outputCommand := exec.Command("envman", "add", "--key", "COMMAND_OUTPUT", "--value", constructOutput(plan, r))
-	if err := outputCommand.Run(); err != nil {
-		return fmt.Errorf("export output with envman: %w", err)
-	}
+		outputCommand := exec.Command("envman", "add", "--key", "COMMAND_OUTPUT", "--value", constructOutput(plan, r))
+		if err := outputCommand.Run(); err != nil {
+			errChan <- fmt.Errorf("export output with envman: %w", err)
+			return
+		}
 
-	return nil
+		errChan <- nil
+	}()
+
+	err = <-errChan
+	close(cancelChan)
+
+	return err
 }
 
 func constructOutput(plan *operationplanner.OperationPlan, runner *runner.Runner) string {
