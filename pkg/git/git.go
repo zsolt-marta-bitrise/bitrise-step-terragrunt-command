@@ -50,7 +50,7 @@ func (git *Git) GetChangedFiles(baseBranch string) ([]string, error) {
 		return []string{}, fmt.Errorf("failed to fetch base branch: %w", err)
 	}
 
-	diffOutput, err := git.command("diff", fmt.Sprintf("..%s", baseBranch), "--name-only").RunAndReturnTrimmedOutput()
+	diffOutput, err := git.command("diff", fmt.Sprintf("...%s", baseBranch), "--name-only").RunAndReturnTrimmedOutput()
 	if err != nil {
 		git.logger.Warnf(diffOutput)
 		return []string{}, fmt.Errorf("failed to diff git, err: %w", err)
