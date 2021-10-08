@@ -15,6 +15,7 @@ import (
 
 func run() error {
 	logger := log.NewLogger()
+	logger.EnableDebugLog(true)
 
 	cfg, err := config.NewConfig()
 	if err != nil {
@@ -22,13 +23,13 @@ func run() error {
 	}
 	stepconf.Print(cfg)
 
-	g := git.New(cfg.RepositoryUrl, cfg.WorkDir)
+	g := git.New(cfg.RepositoryUrl, cfg.WorkDir, logger)
 	changedFiles, err := g.GetChangedFiles(cfg.BaseBranch)
 	if err != nil {
 		return fmt.Errorf("get changed files: %w", err)
 	}
 
-	p := operationplanner.New(changedFiles, cfg.WorkDir, cfg.Command)
+	p := operationplanner.New(changedFiles, cfg.WorkDir, cfg.Command, logger)
 	plan, err := p.PlanOperation()
 	if err != nil {
 		return fmt.Errorf("operation: %w", err)
@@ -39,7 +40,7 @@ func run() error {
 
 	logger.Infof("\n=================================================\n\n")
 	logger.Infof("Running operations in order\n")
-	r := runner.New(plan, g, cfg.Command, cfg.BaseBranch)
+	r := runner.New(plan, g, cfg.Command, cfg.BaseBranch, logger)
 	if err := r.Run(); err != nil {
 		return fmt.Errorf("run operation: %w", err)
 	}

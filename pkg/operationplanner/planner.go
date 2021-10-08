@@ -20,11 +20,11 @@ type OperationPlanner struct {
 	logger     log.Logger
 }
 
-func New(changelist []string, workDir string, command string) *OperationPlanner {
+func New(changelist []string, workDir string, command string, logger log.Logger) *OperationPlanner {
 	return &OperationPlanner{
 		changelist: changelist,
 		workDir:    workDir,
-		logger:     log.NewLogger(),
+		logger:     logger,
 		command:    command,
 	}
 }

@@ -17,11 +17,11 @@ type Git struct {
 	logger  log.Logger
 }
 
-func New(gitURL string, workDir string) *Git {
+func New(gitURL string, workDir string, logger log.Logger) *Git {
 	return &Git{
 		workDir: workDir,
 		gitURL:  gitURL,
-		logger:  log.NewLogger(),
+		logger:  logger,
 	}
 }
 

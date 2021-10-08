@@ -42,11 +42,11 @@ type Runner struct {
 	logger           log.Logger
 }
 
-func New(plan *operationplanner.OperationPlan, codeRepository codeRepository, command string, baseBranch string) *Runner {
+func New(plan *operationplanner.OperationPlan, codeRepository codeRepository, command string, baseBranch string, logger log.Logger) *Runner {
 	return &Runner{
 		plan:             plan,
 		CommandSummaries: map[string]string{},
-		logger:           log.NewLogger(),
+		logger:           logger,
 		Command:          command,
 		codeRepository:   codeRepository,
 		baseBranch:       baseBranch,
